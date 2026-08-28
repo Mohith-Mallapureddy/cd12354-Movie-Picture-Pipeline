@@ -1,0 +1,43 @@
+name: 'Setup AWS and Kubernetes'
+description: 'Configures AWS credentials, logs into Amazon ECR, sets up Kustomize, and configures kubeconfig for EKS'
+inputs:
+  aws-access-key-id:
+    description: 'AWS Access Key ID'
+    required: true
+  aws-secret-access-key:
+    description: 'AWS Secret Access Key'
+    required: true
+  aws-region:
+    description: 'AWS Region'
+    required: false
+    default: 'us-east-1'
+  cluster-name:
+    description: 'EKS Cluster Name'
+    required: false
+    default: 'cluster'
+outputs:
+  ecr-registry:
+    description: 'The Amazon ECR registry URL'
+    value: ${{ steps.login-ecr.outputs.registry }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Kustomize
+      uses: imranismail/setup-kustomize@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Log in to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Update kubeconfig for EKS
+      shell: bash
+      run: |
+        aws eks update-kubeconfig --name ${{ inputs.cluster-name }} --region ${{ inputs.aws-region }}

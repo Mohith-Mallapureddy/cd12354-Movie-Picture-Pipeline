@@ -466,6 +466,89 @@ kustomize edit set image backend=<ECR_REPO_URL>:<NEW_TAG_HERE>
 kustomize build | kubectl apply -f -
 ```
 
+## CI/CD Pipeline Implementation Details
+
+### Architecture & Workflows
+
+This project implements a fully automated CI/CD pipeline with GitHub Actions:
+
+```
++-----------------------------------------------------------------------------+
+|                               CI Workflows                                  |
+|   (Triggered on Pull Request to main or Manual workflow_dispatch)           |
+|                                                                             |
+|   +-----------------------+              +------------------------+         |
+|   |      Lint Job         |              |       Test Job         |         |
+|   |  - ESLint / Flake8    |              |  - Jest / Pytest       |         |
+|   |  - Dependency Caching |              |  - Dependency Caching  |         |
+|   +-----------+-----------+              +-----------+------------+         |
+|               \                              /                              |
+|                \                            /                               |
+|                 +------------+-------------+                                |
+|                              v                                              |
+|                    +-------------------+                                    |
+|                    |     Build Job     |                                    |
+|                    | - Docker Build    |                                    |
+|                    | - Needs: Lint+Test|                                    |
+|                    +-------------------+                                    |
++-----------------------------------------------------------------------------+
+
++-----------------------------------------------------------------------------+
+|                               CD Workflows                                  |
+|     (Triggered on Push to main or Manual workflow_dispatch)                 |
+|                                                                             |
+|   +-------------------+                     +--------------------+          |
+|   |     Lint Job      |                     |      Test Job      |          |
+|   +---------+---------+                     +---------+----------+          |
+|             \                                         /                     |
+|              \                                       /                      |
+|               +------------------+------------------+                       |
+|                                  v                                          |
+|                     +--------------------------+                            |
+|                     | Build, Push & Deploy Job |                            |
+|                     | - AWS Creds via Secrets  |                            |
+|                     | - Amazon ECR Login       |                            |
+|                     | - Docker Tag with Git SHA|                            |
+|                     | - Docker Push to ECR     |                            |
+|                     | - Kustomize Set Image    |                            |
+|                     | - Deploy to EKS (Kubectl)|                            |
+|                     | - Rollout Verification   |                            |
+|                     +--------------------------+                            |
++-----------------------------------------------------------------------------+
+```
+
+### GitHub Workflows
+
+| Workflow | File | Triggers | Description |
+| :--- | :--- | :--- | :--- |
+| **Frontend CI** | `.github/workflows/frontend-ci.yaml` | `pull_request` (on `starter/frontend/**`), `workflow_dispatch` | Runs parallel ESLint and Jest jobs with npm caching, followed by Docker build (`needs: [lint, test]`). |
+| **Backend CI** | `.github/workflows/backend-ci.yaml` | `pull_request` (on `starter/backend/**`), `workflow_dispatch` | Runs parallel Flake8 and Pytest jobs with Pipenv caching, followed by Docker build (`needs: [lint, test]`). |
+| **Frontend CD** | `.github/workflows/frontend-cd.yaml` | `push` to `main` (on `starter/frontend/**`), `workflow_dispatch` | Runs lint & tests, builds Docker image with `REACT_APP_MOVIE_API_URL` and git SHA tag, logs into ECR securely, pushes image, updates manifests via Kustomize, and deploys to EKS. |
+| **Backend CD** | `.github/workflows/backend-cd.yaml` | `push` to `main` (on `starter/backend/**`), `workflow_dispatch` | Runs lint & tests, builds Docker image with git SHA tag, logs into ECR securely, pushes image, updates manifests via Kustomize, and deploys to EKS. |
+
+### Reusable Composite Actions
+
+To follow DRY principles and modularize reusable CI steps, custom composite actions are organized in `.github/actions/`:
+- **`setup-node-cache`** (`.github/actions/setup-node-cache/action.yaml`): Node.js environment setup, caching `~/.npm` and `node_modules`, and `npm ci`.
+- **`setup-python-cache`** (`.github/actions/setup-python-cache/action.yaml`): Python 3.10 setup, caching virtualenvs, Pipenv installation and dependency restore.
+- **`setup-aws-k8s`** (`.github/actions/setup-aws-k8s/action.yaml`): AWS credentials configuration, Amazon ECR login via `aws-actions/amazon-ecr-login@v2`, Kustomize setup, and `kubectl` kubeconfig update.
+- **`pr-comment-status`** (`.github/actions/pr-comment-status/action.yaml`): Automated pull request commenting with workflow status summaries.
+
+### GitHub Repository Secrets
+
+Configure the following secrets in GitHub under **Settings > Secrets and variables > Actions**:
+
+| Secret Name | Required | Description | Example / Default |
+| :--- | :--- | :--- | :--- |
+| `AWS_ACCESS_KEY_ID` | Yes | AWS Access Key for `github-action-user` | `AKIA...` |
+| `AWS_SECRET_ACCESS_KEY` | Yes | AWS Secret Access Key for `github-action-user` | `wJalrX...` |
+| `AWS_REGION` | No | AWS Region for ECR & EKS | `us-east-1` (default) |
+| `EKS_CLUSTER_NAME` | No | Name of the Amazon EKS cluster | `cluster` (default) |
+| `REACT_APP_MOVIE_API_URL` | No | Backend API endpoint URL for React build | `http://localhost:5000` / LoadBalancer URL |
+
+---
+
 ## License
 
 [License](LICENSE.md)
+
