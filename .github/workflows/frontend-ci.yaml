@@ -85,6 +85,29 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.14'
+
+      - name: Perform cache action to restore cache before dependency install
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            starter/frontend/node_modules
+          key: ${{ runner.os }}-frontend-node-18-${{ hashFiles('starter/frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-frontend-node-18-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the npm run test command
+        env:
+          CI: true
+        run: npm run test
+
       - name: Build Docker Image
         env:
           REACT_APP_MOVIE_API_URL: http://localhost:5000
